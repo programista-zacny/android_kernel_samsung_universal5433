@@ -1044,10 +1044,19 @@ void mif_init_irq(struct modem_irq *irq, unsigned int num, const char *name,
 	irq->num = num;
 	strncpy(irq->name, name, (MAX_NAME_LEN - 1));
 	irq->flags = flags;
+	irq->wake = false;
 	mif_info("%s: name:%s num:%d flags:0x%08lX\n",
 		FUNC, name, num, flags);
 }
 
+/**
+@brief		request an IRQ and arm it as a wake-up source at once
+
+@remark		The IRQ stays armed for as long as nobody calls
+		mif_disable_irq_wake(), also while it is disabled. Use
+		mif_request_irq_nowake() for an IRQ whose line is not driven
+		while the modem is off.
+*/
 int mif_request_irq(struct modem_irq *irq, irq_handler_t isr, void *data)
 {
 	int ret;
@@ -1065,7 +1074,36 @@ int mif_request_irq(struct modem_irq *irq, irq_handler_t isr, void *data)
 	if (ret) {
 		mif_err("%s: %s: ERR! enable_irq_wake fail (%d)\n",
 			FUNC, irq->name, ret);
+	} else {
+		irq->wake = true;
 	}
+
+	mif_info("%s: %s(#%d) handler registered (flags:0x%08lX)\n",
+		FUNC, irq->name, irq->num, irq->flags);
+
+	return 0;
+}
+
+/**
+@brief		request an IRQ without arming it as a wake-up source
+
+The IRQ is left enabled, exactly as mif_request_irq() leaves it, but it can
+neither wake the system up nor make check_wakeup_irqs() abort a suspend until
+mif_enable_irq_wake() is called.
+*/
+int mif_request_irq_nowake(struct modem_irq *irq, irq_handler_t isr,
+			   void *data)
+{
+	int ret;
+
+	ret = request_irq(irq->num, isr, irq->flags, irq->name, data);
+	if (ret) {
+		mif_err("%s: %s: ERR! request_irq fail (%d)\n",
+			FUNC, irq->name, ret);
+		return ret;
+	}
+
+	irq->active = true;
 
 	mif_info("%s: %s(#%d) handler registered (flags:0x%08lX)\n",
 		FUNC, irq->name, irq->num, irq->flags);
@@ -1113,6 +1151,73 @@ void mif_disable_irq(struct modem_irq *irq)
 	irq->active = false;
 
 	mif_info("%s: %s(#%d) is disabled <%pf>\n",
+		FUNC, irq->name, irq->num, CALLER);
+
+exit:
+	spin_unlock_irqrestore(&irq->lock, flags);
+}
+
+/**
+@brief		arm an IRQ as a wake-up source
+
+Does nothing if the IRQ is armed already, so that the callers need not keep
+the enable_irq_wake()/disable_irq_wake() calls balanced themselves.
+
+@remark		Arm an IRQ only while it is enabled. This kernel aborts every
+		suspend for as long as a wake-up IRQ has IRQS_PENDING set, and
+		a disabled IRQ keeps that flag until it is enabled again.
+*/
+void mif_enable_irq_wake(struct modem_irq *irq)
+{
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&irq->lock, flags);
+
+	if (irq->wake)
+		goto exit;
+
+	ret = enable_irq_wake(irq->num);
+	if (ret) {
+		mif_err("%s: %s(#%d) ERR! enable_irq_wake fail (%d) <%pf>\n",
+			FUNC, irq->name, irq->num, ret, CALLER);
+		goto exit;
+	}
+
+	irq->wake = true;
+
+	mif_info("%s: %s(#%d) is armed for wake-up <%pf>\n",
+		FUNC, irq->name, irq->num, CALLER);
+
+exit:
+	spin_unlock_irqrestore(&irq->lock, flags);
+}
+
+/**
+@brief		stop an IRQ from being a wake-up source
+
+Does nothing if the IRQ is not armed.
+*/
+void mif_disable_irq_wake(struct modem_irq *irq)
+{
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&irq->lock, flags);
+
+	if (!irq->wake)
+		goto exit;
+
+	ret = disable_irq_wake(irq->num);
+	if (ret) {
+		mif_err("%s: %s(#%d) ERR! disable_irq_wake fail (%d) <%pf>\n",
+			FUNC, irq->name, irq->num, ret, CALLER);
+		goto exit;
+	}
+
+	irq->wake = false;
+
+	mif_info("%s: %s(#%d) is disarmed for wake-up <%pf>\n",
 		FUNC, irq->name, irq->num, CALLER);
 
 exit:

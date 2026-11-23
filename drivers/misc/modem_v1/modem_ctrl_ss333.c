@@ -162,6 +162,7 @@ static int ss333_on(struct modem_ctl *mc)
 	struct link_device *ld = get_current_link(iod);
 	unsigned long flags;
 
+	mif_disable_irq_wake(&mc->irq_cp_active);
 	mif_disable_irq(&mc->irq_cp_active);
 
 	mif_info("%s: %s: +++\n", mc->name, FUNC);
@@ -215,6 +216,7 @@ static int ss333_off(struct modem_ctl *mc)
 	unsigned long flags;
 	int i;
 
+	mif_disable_irq_wake(&mc->irq_cp_active);
 	mif_disable_irq(&mc->irq_cp_active);
 
 	mif_info("%s: %s: +++\n", mc->name, FUNC);
@@ -342,6 +344,7 @@ static int ss333_dump_reset(struct modem_ctl *mc)
 	unsigned int gpio_cp_reset = mc->gpio_cp_reset;
 	unsigned long flags;
 
+	mif_disable_irq_wake(&mc->irq_cp_active);
 	mif_disable_irq(&mc->irq_cp_active);
 
 	mif_info("%s: %s: +++\n", mc->name, FUNC);
@@ -416,6 +419,7 @@ static int ss333_boot_off(struct modem_ctl *mc)
 	}
 
 	mif_enable_irq(&mc->irq_cp_active);
+	mif_enable_irq_wake(&mc->irq_cp_active);
 
 	spin_lock_irqsave(&mc->lock, flags);
 	mc->bootd->modem_state_changed(mc->bootd, STATE_ONLINE);
@@ -572,7 +576,12 @@ int ss333_init_modemctl_device(struct modem_ctl *mc, struct modem_data *pdata)
 	snprintf(name, MAX_NAME_LEN, "%s_active", mc->name);
 	mif_init_irq(&mc->irq_cp_active, irq, name, flag);
 
-	ret = mif_request_irq(&mc->irq_cp_active, cp_active_handler, mc);
+	/*
+	PHONE_ACTIVE is not driven while CP is off and the pin has no pull, so
+	the IRQ must not be a wake-up source before CP has been booted. It is
+	armed in ss333_boot_off() and disarmed again wherever it is disabled.
+	*/
+	ret = mif_request_irq_nowake(&mc->irq_cp_active, cp_active_handler, mc);
 	if (ret) {
 		mif_err("%s: ERR! request_irq(%s#%d) fail (%d)\n",
 			mc->name, mc->irq_cp_active.name,

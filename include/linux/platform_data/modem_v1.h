@@ -471,6 +471,7 @@ struct modem_irq {
 	char name[MAX_NAME_LEN];
 	unsigned long flags;
 	bool active;
+	bool wake;	/* armed as a wake-up source (enable_irq_wake) */
 };
 
 #define MODEM_BOOT_DEV_SPI "spi_boot_link"

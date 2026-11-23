@@ -822,14 +822,17 @@ static void start_link_pm(struct modem_link_pm *pm, enum pm_event event)
 
 	/*
 	Enable every CP-to-AP IRQ and set it as a wake-up source
+	(enable first: that drops what a disabled level IRQ has left pending)
 	*/
 	cp2ap_wakeup = gpio_get_value(pm->gpio_cp2ap_wakeup);
 	change_irq_level(pm->cp2ap_wakeup_irq.num, cp2ap_wakeup);
 	mif_enable_irq(&pm->cp2ap_wakeup_irq);
+	mif_enable_irq_wake(&pm->cp2ap_wakeup_irq);
 
 	cp2ap_status = gpio_get_value(pm->gpio_cp2ap_status);
 	change_irq_level(pm->cp2ap_status_irq.num, cp2ap_status);
 	mif_enable_irq(&pm->cp2ap_status_irq);
+	mif_enable_irq_wake(&pm->cp2ap_status_irq);
 
 	set_pm_fsm(pm, PM_STATE_UNMOUNTED, state, event);
 
@@ -856,10 +859,16 @@ static void stop_link_pm(struct modem_link_pm *pm)
 
 	pm->active = false;
 
+	/*
+	A disabled IRQ must not stay a wake-up source: the lines float while CP
+	is off, and a wake-up IRQ left pending aborts every suspend
+	*/
+	mif_disable_irq_wake(&pm->cp2ap_wakeup_irq);
 	mif_disable_irq(&pm->cp2ap_wakeup_irq);
 	mif_err("%s: PM %s_irq#%d handler disabled\n", pm->link_name,
 		pm->cp2ap_wakeup_irq.name, pm->cp2ap_wakeup_irq.num);
 
+	mif_disable_irq_wake(&pm->cp2ap_status_irq);
 	mif_disable_irq(&pm->cp2ap_status_irq);
 	mif_err("%s: PM %s_irq#%d handler disabled\n", pm->link_name,
 		pm->cp2ap_status_irq.name, pm->cp2ap_status_irq.num);
@@ -933,11 +942,14 @@ int init_link_device_pm(struct link_device *ld,
 
 	/*
 	Register cp2ap_wakeup IRQ handler
+	(not as a wake-up source yet: start_link_pm() arms both CP-to-AP IRQs
+	and stop_link_pm() disarms them)
 	*/
 	cp2ap_wakeup = gpio_get_value(pm->gpio_cp2ap_wakeup);
 	change_irq_level(pm->cp2ap_wakeup_irq.num, cp2ap_wakeup);
 
-	err = mif_request_irq(&pm->cp2ap_wakeup_irq, cp2ap_wakeup_handler, pm);
+	err = mif_request_irq_nowake(&pm->cp2ap_wakeup_irq,
+				     cp2ap_wakeup_handler, pm);
 	if (err) {
 		mif_err("%s: ERR! request_irq(%s#%d) fail (%d)\n",
 			pm->link_name, pm->cp2ap_wakeup_irq.name,
@@ -955,7 +967,8 @@ int init_link_device_pm(struct link_device *ld,
 	cp2ap_status = gpio_get_value(pm->gpio_cp2ap_status);
 	change_irq_level(pm->cp2ap_status_irq.num, cp2ap_status);
 
-	err = mif_request_irq(&pm->cp2ap_status_irq, cp2ap_status_handler, pm);
+	err = mif_request_irq_nowake(&pm->cp2ap_status_irq,
+				     cp2ap_status_handler, pm);
 	if (err) {
 		mif_err("%s: ERR! request_irq(%s#%d) fail (%d)\n",
 			pm->link_name, pm->cp2ap_status_irq.name,
