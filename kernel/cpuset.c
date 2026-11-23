@@ -128,6 +128,44 @@ static inline struct cpuset *parent_cs(const struct cpuset *cs)
 	return NULL;
 }
 
+/*
+ * A hierarchy mounted with "cpuset_v2_mode" treats CPU hotplug the way
+ * cgroup v2 does: a cpuset keeps its tasks while none of the CPUs it
+ * requested is online.  Until one comes back they run on the CPUs of the
+ * nearest ancestor that has some, see effective_cpumask_cpuset().  Without
+ * the option such tasks are moved to that ancestor for good.
+ */
+static inline bool is_in_v2_mode(const struct cpuset *cs)
+{
+	return cs->css.cgroup->root->flags & CGRP_ROOT_CPUSET_V2_MODE;
+}
+
+/*
+ * effective_cpumask_cpuset - the cpuset whose cpus the tasks of @cs run on
+ * @cs: the cpuset of interest
+ *
+ * That is @cs itself, or its nearest ancestor with cpus if @cs has none at
+ * the moment.  top_cpuset tracks cpu_active_mask and is never empty, so the
+ * walk always ends.
+ */
+static struct cpuset *effective_cpumask_cpuset(struct cpuset *cs)
+{
+	while (cpumask_empty(cs->cpus_allowed))
+		cs = parent_cs(cs);
+	return cs;
+}
+
+/*
+ * Can tasks stay in @cs?  Not without memory, and outside v2 mode not
+ * without cpus either.
+ */
+static bool cpuset_must_be_vacated(const struct cpuset *cs)
+{
+	if (nodes_empty(cs->mems_allowed))
+		return true;
+	return cpumask_empty(cs->cpus_allowed) && !is_in_v2_mode(cs);
+}
+
 #ifdef CONFIG_NUMA
 static inline bool task_has_mempolicy(struct task_struct *task)
 {
@@ -490,13 +528,17 @@ static int validate_change(const struct cpuset *cur, const struct cpuset *trial)
 
 	/*
 	 * Cpusets with tasks - existing or newly being attached - can't
-	 * have empty cpus_allowed or mems_allowed.
+	 * have empty cpus_allowed or mems_allowed.  In v2 mode the cpus
+	 * only have to be requested, they need not be online.
 	 */
 	ret = -ENOSPC;
-	if ((cgroup_task_count(cur->css.cgroup) || cur->attach_in_progress) &&
-	    (cpumask_empty(trial->cpus_allowed) ||
-	     nodes_empty(trial->mems_allowed)))
-		goto out;
+	if (cgroup_task_count(cur->css.cgroup) || cur->attach_in_progress) {
+		if (cpumask_empty(is_in_v2_mode(cur) ? trial->cpus_requested :
+						       trial->cpus_allowed))
+			goto out;
+		if (nodes_empty(trial->mems_allowed))
+			goto out;
+	}
 
 	ret = 0;
 out:
@@ -814,13 +856,14 @@ void rebuild_sched_domains(void)
  * Call with cpuset_mutex held.  May take callback_mutex during call.
  * Called for each task in a cgroup by cgroup_scan_tasks().
  * Return nonzero if this tasks's cpus_allowed mask should be changed (in other
- * words, if its mask is not equal to its cpuset's mask).
+ * words, if its mask is not equal to its cpuset's effective mask).
  */
 static int cpuset_test_cpumask(struct task_struct *tsk,
 			       struct cgroup_scanner *scan)
 {
-	return !cpumask_equal(&tsk->cpus_allowed,
-			(cgroup_cs(scan->cg))->cpus_allowed);
+	struct cpuset *cpus_cs = effective_cpumask_cpuset(cgroup_cs(scan->cg));
+
+	return !cpumask_equal(&tsk->cpus_allowed, cpus_cs->cpus_allowed);
 }
 
 /**
@@ -829,7 +872,8 @@ static int cpuset_test_cpumask(struct task_struct *tsk,
  * @scan: struct cgroup_scanner containing the cgroup of the task
  *
  * Called by cgroup_scan_tasks() for each task in a cgroup whose
- * cpus_allowed mask needs to be changed.
+ * cpus_allowed mask needs to be changed.  A cpuset that has no cpus at the
+ * moment hands out the cpus of its nearest ancestor that has some.
  *
  * We don't need to re-check for the cgroup/cpuset membership, since we're
  * holding cpuset_mutex at this point.
@@ -837,7 +881,9 @@ static int cpuset_test_cpumask(struct task_struct *tsk,
 static void cpuset_change_cpumask(struct task_struct *tsk,
 				  struct cgroup_scanner *scan)
 {
-	set_cpus_allowed_ptr(tsk, ((cgroup_cs(scan->cg))->cpus_allowed));
+	struct cpuset *cpus_cs = effective_cpumask_cpuset(cgroup_cs(scan->cg));
+
+	set_cpus_allowed_ptr(tsk, cpus_cs->cpus_allowed);
 }
 
 /**
@@ -930,6 +976,21 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 	update_tasks_cpumask(cs, &heap);
 
 	heap_free(&heap);
+
+	/*
+	 * Descendants without cpus of their own run on @cs's cpus in v2
+	 * mode.  Their hotplug work re-evaluates them; it cannot be done
+	 * here, cgroup_scan_tasks() sleeps and the walk is under RCU.
+	 */
+	if (is_in_v2_mode(cs)) {
+		struct cpuset *cp;
+		struct cgroup *pos_cgrp;
+
+		rcu_read_lock();
+		cpuset_for_each_descendant_pre(cp, pos_cgrp, cs)
+			schedule_cpuset_propagate_hotplug(cp);
+		rcu_read_unlock();
+	}
 
 	if (is_load_balanced)
 		rebuild_sched_domains_locked();
@@ -1399,8 +1460,15 @@ static int cpuset_can_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
 
 	mutex_lock(&cpuset_mutex);
 
+	/*
+	 * No tasks in a cpuset without cpus or mems.  In v2 mode it is enough
+	 * that cpus are requested; cpuset_attach() falls back to an ancestor's
+	 * while they are offline.
+	 */
 	ret = -ENOSPC;
-	if (cpumask_empty(cs->cpus_allowed) || nodes_empty(cs->mems_allowed))
+	if (cpumask_empty(is_in_v2_mode(cs) ? cs->cpus_requested :
+					      cs->cpus_allowed) ||
+	    nodes_empty(cs->mems_allowed))
 		goto out_unlock;
 
 	cgroup_taskset_for_each(task, cgrp, tset) {
@@ -1501,8 +1569,10 @@ static void cpuset_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
 	 * We may have raced with CPU/memory hotunplug.  Trigger hotplug
 	 * propagation if @cs doesn't have any CPU or memory.  It will move
 	 * the newly added tasks to the nearest parent which can execute.
+	 * (Not for a v2-mode cpuset that is only out of cpus: its tasks
+	 * stay, and got an ancestor's cpus above.)
 	 */
-	if (cpumask_empty(cs->cpus_allowed) || nodes_empty(cs->mems_allowed))
+	if (cpuset_must_be_vacated(cs))
 		schedule_cpuset_propagate_hotplug(cs);
 
 	mutex_unlock(&cpuset_mutex);
@@ -1514,6 +1584,7 @@ typedef enum {
 	FILE_MEMORY_MIGRATE,
 	FILE_CPULIST,
 	FILE_MEMLIST,
+	FILE_EFFECTIVE_CPULIST,
 	FILE_CPU_EXCLUSIVE,
 	FILE_MEM_EXCLUSIVE,
 	FILE_MEM_HARDWALL,
@@ -1676,6 +1747,18 @@ static size_t cpuset_sprintf_cpulist(char *page, struct cpuset *cs)
 	return count;
 }
 
+static size_t cpuset_sprintf_effective_cpulist(char *page, struct cpuset *cs)
+{
+	size_t count;
+
+	mutex_lock(&callback_mutex);
+	count = cpulist_scnprintf(page, PAGE_SIZE,
+				  effective_cpumask_cpuset(cs)->cpus_allowed);
+	mutex_unlock(&callback_mutex);
+
+	return count;
+}
+
 static size_t cpuset_sprintf_memlist(char *page, struct cpuset *cs)
 {
 	size_t count;
@@ -1710,6 +1793,9 @@ static ssize_t cpuset_common_file_read(struct cgroup *cont,
 		break;
 	case FILE_MEMLIST:
 		s += cpuset_sprintf_memlist(s, cs);
+		break;
+	case FILE_EFFECTIVE_CPULIST:
+		s += cpuset_sprintf_effective_cpulist(s, cs);
 		break;
 	default:
 		retval = -EINVAL;
@@ -1789,6 +1875,12 @@ static struct cftype files[] = {
 		.write_string = cpuset_write_resmask,
 		.max_write_len = (100U + 6 * MAX_NUMNODES),
 		.private = FILE_MEMLIST,
+	},
+
+	{
+		.name = "effective_cpus",
+		.read = cpuset_common_file_read,
+		.private = FILE_EFFECTIVE_CPULIST,
 	},
 
 	{
@@ -2103,8 +2195,15 @@ static void cpuset_propagate_hotplug_workfn(struct work_struct *work)
 		update_tasks_nodemask(cs, &tmp_mems, NULL);
 	}
 
-	is_empty = cpumask_empty(cs->cpus_allowed) ||
-		nodes_empty(cs->mems_allowed);
+	/*
+	 * A v2-mode cpuset that is out of cpus keeps its tasks; they run on
+	 * the cpus of an ancestor, and those may have changed even if @cs's
+	 * own did not.
+	 */
+	if (cpumask_empty(cs->cpus_allowed) && is_in_v2_mode(cs))
+		update_tasks_cpumask(cs, NULL);
+
+	is_empty = cpuset_must_be_vacated(cs);
 
 	mutex_unlock(&cpuset_mutex);
 
@@ -2287,12 +2386,13 @@ void cpuset_cpus_allowed(struct task_struct *tsk, struct cpumask *pmask)
 
 void cpuset_cpus_allowed_fallback(struct task_struct *tsk)
 {
-	const struct cpuset *cs;
+	struct cpuset *cs;
 
 	rcu_read_lock();
 	cs = task_cs(tsk);
 	if (cs)
-		do_set_cpus_allowed(tsk, cs->cpus_allowed);
+		do_set_cpus_allowed(tsk,
+				    effective_cpumask_cpuset(cs)->cpus_allowed);
 	rcu_read_unlock();
 
 	/*
