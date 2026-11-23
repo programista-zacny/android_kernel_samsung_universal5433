@@ -827,11 +827,15 @@ static void ffs_user_copy_worker(struct work_struct *work)
 		unuse_mm(io_data->mm);
 	}
 
+	/*
+	 * aio_complete() drops what is normally the last reference to the
+	 * kiocb, so it must not be touched afterwards.
+	 */
+	io_data->kiocb->private = NULL;
 	aio_complete(io_data->kiocb, ret, ret);
 
 	usb_ep_free_request(io_data->ep, io_data->req);
 
-	io_data->kiocb->private = NULL;
 	if (io_data->read)
 		kfree(io_data->iovec);
 	kfree(io_data->buf);
