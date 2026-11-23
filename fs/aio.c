@@ -621,8 +621,11 @@ void aio_complete(struct kiocb *iocb, long res, long res2)
 	 */
 	if (unlikely(xchg(&iocb->ki_cancel,
 			  KIOCB_CANCELLED) == KIOCB_CANCELLED)) {
-		atomic_dec(&ctx->reqs_active);
-		/* Still need the wake_up in case free_ioctx is waiting */
+		/*
+		 * reqs_active is dropped at put_rq below, like for any other
+		 * request. Still need the wake_up in case free_ioctx is
+		 * waiting.
+		 */
 		goto put_rq;
 	}
 
