@@ -28,6 +28,20 @@ EXPORT_SYMBOL_GPL(pm_freezing);
 /* protects freezing and frozen transitions */
 static DEFINE_SPINLOCK(freezer_lock);
 
+/*
+ * A task that is being killed is neither sent to nor kept in the
+ * refrigerator by the cgroup freezer, so that killing a frozen process
+ * frees its memory at once instead of when the cgroup is thawed.
+ * SIGNAL_GROUP_EXIT covers the time after the task has dequeued its
+ * SIGKILL and before do_exit() sets PF_NOFREEZE.  The system-wide (PM)
+ * freezer is not affected, see freezing_slow_path().
+ */
+static bool cgroup_freezer_task_killed(struct task_struct *p)
+{
+	return __fatal_signal_pending(p) ||
+	       (p->signal->flags & SIGNAL_GROUP_EXIT);
+}
+
 /**
  * freezing_slow_path - slow path for testing whether a task needs to be frozen
  * @p: task to be tested
@@ -45,10 +59,13 @@ bool freezing_slow_path(struct task_struct *p)
 	if (test_thread_flag(TIF_MEMDIE))
 		return false;
 
-	if (pm_nosig_freezing || cgroup_freezing(p))
+	if (pm_nosig_freezing)
 		return true;
 
 	if (pm_freezing && !(p->flags & PF_KTHREAD))
+		return true;
+
+	if (cgroup_freezing(p) && !cgroup_freezer_task_killed(p))
 		return true;
 
 	return false;
@@ -66,9 +83,30 @@ bool __refrigerator(bool check_kthr_stop)
 	pr_debug("%s entered refrigerator\n", current->comm);
 
 	for (;;) {
-		set_current_state(TASK_UNINTERRUPTIBLE);
-
 		spin_lock_irq(&freezer_lock);
+		/*
+		 * A task that is here only because of the cgroup freezer
+		 * sleeps killable: SIGKILL wakes it up, freezing() is then
+		 * false for it (see freezing_slow_path()) and it leaves to
+		 * die.  While a system-wide freeze is in progress every task
+		 * has to stay put, killed or not, so the sleep is
+		 * uninterruptible then, and a kill that arrives in the
+		 * meantime is acted upon when thaw_processes() wakes the
+		 * task up.
+		 *
+		 * The state is chosen under freezer_lock: thaw_processes()
+		 * clears the pm_* flags before it calls __thaw_task(), which
+		 * takes the lock and wakes every task that has PF_FROZEN set.
+		 * A task that saw the flags set here is therefore woken up
+		 * afterwards and chooses again.  When a system-wide freeze
+		 * starts after the flags were read, a killed task falls
+		 * through schedule() once and chooses again as well.
+		 */
+		if (pm_freezing || pm_nosig_freezing)
+			set_current_state(TASK_UNINTERRUPTIBLE);
+		else
+			set_current_state(TASK_KILLABLE);
+
 		current->flags |= PF_FROZEN;
 		if (!freezing(current) ||
 		    (check_kthr_stop && kthread_should_stop()))

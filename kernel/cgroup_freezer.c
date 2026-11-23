@@ -455,6 +455,26 @@ static u64 freezer_parent_freezing_read(struct cgroup *cgroup, struct cftype *cf
 	return (bool)(freezer->state & CGROUP_FREEZING_PARENT);
 }
 
+/*
+ * "freezer.killable" reads 1: a frozen task of a freezer cgroup dies at once
+ * when it is killed (see cgroup_freezer_task_killed() in kernel/freezer.c),
+ * as with the cgroup v2 freezer.  Userspace that kills frozen processes
+ * without thawing them first can test for the file.  On Android kernels
+ * that have this file it is a per-cgroup switch that is off by default;
+ * here it cannot be turned off, so writing 1 is accepted and does nothing
+ * and writing anything else fails.
+ */
+static u64 freezer_killable_read(struct cgroup *cgroup, struct cftype *cft)
+{
+	return 1;
+}
+
+static int freezer_killable_write(struct cgroup *cgroup, struct cftype *cft,
+				  u64 val)
+{
+	return val == 1 ? 0 : -EINVAL;
+}
+
 static struct cftype files[] = {
 	{
 		.name = "state",
@@ -471,6 +491,12 @@ static struct cftype files[] = {
 		.name = "parent_freezing",
 		.flags = CFTYPE_NOT_ON_ROOT,
 		.read_u64 = freezer_parent_freezing_read,
+	},
+	{
+		.name = "killable",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.read_u64 = freezer_killable_read,
+		.write_u64 = freezer_killable_write,
 	},
 	{ }	/* terminate */
 };
