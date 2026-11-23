@@ -975,10 +975,11 @@ first_try:
 		struct usb_request *req;
 
 		if (io_data->aio) {
-			req = usb_ep_alloc_request(ep->ep, GFP_KERNEL);
+			req = usb_ep_alloc_request(ep->ep, GFP_ATOMIC);
 			if (unlikely(!req)) {
 				ret = -ENOMEM;
 				spin_unlock_irq(&epfile->ffs->eps_lock);
+				mutex_unlock(&epfile->mutex);
 				goto error;
 			}
 
@@ -996,6 +997,7 @@ first_try:
 			if (unlikely(ret)) {
 				usb_ep_free_request(ep->ep, req);
 				spin_unlock_irq(&epfile->ffs->eps_lock);
+				mutex_unlock(&epfile->mutex);
 				goto error;
 			}
 			ret = -EIOCBQUEUED;
@@ -1130,6 +1132,15 @@ static int ffs_aio_cancel(struct kiocb *kiocb, struct io_event *event)
 		value = -EINVAL;
 
 	spin_unlock_irq(&epfile->ffs->eps_lock);
+
+	/*
+	 * In this kernel kiocb_cancel() takes a reference on the kiocb before
+	 * calling ->ki_cancel() and expects the callback to drop it (see
+	 * ep_aio_cancel() in inode.c). Without this the kiocb is never freed,
+	 * its struct file is never released and the function can never be
+	 * closed and re-opened.
+	 */
+	aio_put_req(kiocb);
 
 	return value;
 }
