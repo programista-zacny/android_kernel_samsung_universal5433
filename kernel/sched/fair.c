@@ -8332,7 +8332,12 @@ __init void init_sched_fair_class(void)
 #ifdef CONFIG_HMP_FREQUENCY_INVARIANT_SCALE
 static u32 cpufreq_calc_scale(u32 min, u32 max, u32 curr)
 {
-	u32 result = curr / max;
+	u32 result;
+
+	/* An extent of 0 would be a policy clamped to nothing; keep full scale. */
+	if (unlikely(!max))
+		return 1024;
+	result = curr / max;
 	return result;
 }
 
