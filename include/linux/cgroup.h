@@ -281,6 +281,12 @@ enum {
 
 	CGRP_ROOT_NOPREFIX	= (1 << 1), /* mounted subsystems have no named prefix */
 	CGRP_ROOT_XATTR		= (1 << 2), /* supports extended attributes */
+
+	/*
+	 * "cpuset_v2_mode" mount option: the cpusets of this hierarchy handle
+	 * CPU hotplug the way cgroup v2 does.  Read by kernel/cpuset.c only.
+	 */
+	CGRP_ROOT_CPUSET_V2_MODE = (1 << 3),
 };
 
 /*
