@@ -18,6 +18,8 @@
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/bitops.h>
+#include <linux/bitmap.h>
+#include <linux/close_range.h>
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
@@ -607,6 +609,86 @@ int __close_fd(struct files_struct *files, unsigned fd)
 out_unlock:
 	spin_unlock(&files->file_lock);
 	return -EBADF;
+}
+
+static void __range_cloexec(struct files_struct *cur_fds,
+			    unsigned int fd, unsigned int max_fd)
+{
+	struct fdtable *fdt;
+
+	/* make sure we're using the correct maximum value */
+	spin_lock(&cur_fds->file_lock);
+	fdt = files_fdtable(cur_fds);
+	max_fd = min(max_fd, fdt->max_fds - 1);
+	if (fd <= max_fd)
+		bitmap_set(fdt->close_on_exec, fd, max_fd - fd + 1);
+	spin_unlock(&cur_fds->file_lock);
+}
+
+static void __range_close(struct files_struct *cur_fds,
+			  unsigned int fd, unsigned int max_fd)
+{
+	unsigned int cur_max;
+
+	rcu_read_lock();
+	cur_max = files_fdtable(cur_fds)->max_fds;
+	rcu_read_unlock();
+
+	/* cap to last valid index into fdtable */
+	max_fd = min(max_fd, cur_max - 1);
+
+	while (fd <= max_fd) {
+		/* -EBADF for a slot that is not in use; errors are ignored */
+		__close_fd(cur_fds, fd++);
+		cond_resched();
+	}
+}
+
+/**
+ * close_range() - Close all file descriptors in a given range.
+ *
+ * @fd:     starting file descriptor to close
+ * @max_fd: last file descriptor to close
+ * @flags:  CLOSE_RANGE_UNSHARE and/or CLOSE_RANGE_CLOEXEC
+ *
+ * This closes a range of file descriptors. All file descriptors
+ * from @fd up to and including @max_fd are closed, or, with
+ * CLOSE_RANGE_CLOEXEC, marked close-on-exec instead.
+ * Currently, errors to close a given file descriptor are ignored.
+ */
+SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
+		unsigned int, flags)
+{
+	struct files_struct *cur_fds = current->files;
+
+	if (flags & ~(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC))
+		return -EINVAL;
+
+	if (fd > max_fd)
+		return -EINVAL;
+
+	if (flags & CLOSE_RANGE_UNSHARE) {
+		struct files_struct *displaced;
+		int ret;
+
+		/*
+		 * Gives us a private copy of the table if it is shared with
+		 * another task, and installs it as current->files.
+		 */
+		ret = unshare_files(&displaced);
+		if (ret)
+			return ret;
+		if (displaced)
+			put_files_struct(displaced);
+		cur_fds = current->files;
+	}
+
+	if (flags & CLOSE_RANGE_CLOEXEC)
+		__range_cloexec(cur_fds, fd, max_fd);
+	else
+		__range_close(cur_fds, fd, max_fd);
+
+	return 0;
 }
 
 void do_close_on_exec(struct files_struct *files)
