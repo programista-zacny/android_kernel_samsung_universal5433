@@ -318,6 +318,9 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 	atomic_set(&pid->count, 1);
 	for (type = 0; type < PIDTYPE_MAX; ++type)
 		INIT_HLIST_HEAD(&pid->tasks[type]);
+#ifdef CONFIG_PIDFD
+	init_waitqueue_head(&pid->wait_pidfd);
+#endif
 
 	upid = pid->numbers + ns->level;
 	spin_lock_irq(&pidmap_lock);
@@ -595,6 +598,9 @@ void __init pidmap_init(void)
 	set_bit(0, init_pid_ns.pidmap[0].page);
 	atomic_dec(&init_pid_ns.pidmap[0].nr_free);
 	init_pid_ns.nr_hashed = PIDNS_HASH_ADDING;
+#ifdef CONFIG_PIDFD
+	init_waitqueue_head(&init_struct_pid.wait_pidfd);
+#endif
 
 	init_pid_ns.pid_cachep = KMEM_CACHE(pid,
 			SLAB_HWCACHE_ALIGN | SLAB_PANIC);

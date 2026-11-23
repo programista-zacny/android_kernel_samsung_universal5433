@@ -1647,6 +1647,12 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 	BUG_ON(!tsk->ptrace &&
 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
 
+	/*
+	 * Wake up all pidfd waiters. When called from exit_notify(),
+	 * exit_state is not set yet; exit_notify() wakes them again.
+	 */
+	do_notify_pidfd(tsk);
+
 	if (sig != SIGCHLD) {
 		/*
 		 * This is only possible if parent == real_parent.

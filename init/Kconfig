@@ -1402,6 +1402,23 @@ config EPOLL
 	  Disabling this option will cause the kernel to be built without
 	  support for epoll family of system calls.
 
+config PIDFD
+	bool "Enable pidfd_open(), pidfd_send_signal() and pidfd polling"
+	select ANON_INODES
+	default n
+	help
+	  Enable file descriptors that refer to a process: the pidfd_open()
+	  and pidfd_send_signal() system calls, and poll() on a pidfd to wait
+	  for the process to exit. Android's lmkd uses them to signal the
+	  processes it kills without racing against pid reuse and to wait
+	  for them to die.
+
+	  Mainline has no option for this; it exists in this backport so
+	  that the feature can be switched off. waitid(P_PIDFD) is
+	  included; CLONE_PIDFD and pidfd_getfd() are not implemented.
+
+	  If unsure, say N.
+
 config SIGNALFD
 	bool "Enable signalfd() system call" if EXPERT
 	select ANON_INODES
