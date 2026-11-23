@@ -4118,7 +4118,16 @@ exit:
 SYSCALL_DEFINE5(renameat2, int, olddfd, const char __user *, oldname,
 		int, newdfd, const char __user *, newname, unsigned int, flags)
 {
-	return sys_renameat(AT_FDCWD, oldname, AT_FDCWD, newname);
+	/*
+	 * No filesystem in this tree implements ->rename2, so none of
+	 * RENAME_NOREPLACE, RENAME_EXCHANGE or RENAME_WHITEOUT can be
+	 * honoured. Mainline returns -EINVAL for a filesystem without
+	 * ->rename2 when flags are given, and callers fall back on that.
+	 */
+	if (flags)
+		return -EINVAL;
+
+	return sys_renameat(olddfd, oldname, newdfd, newname);
 }
 
 SYSCALL_DEFINE2(rename, const char __user *, oldname, const char __user *, newname)
