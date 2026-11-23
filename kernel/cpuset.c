@@ -2080,6 +2080,25 @@ static void cpuset_css_free(struct cgroup *cont)
 	kfree(cs);
 }
 
+/*
+ * Make sure the new task conforms to the current state of its parent,
+ * which could have been changed by cpuset just after it inherited the
+ * state from the parent and before it sits on the cgroup's task list.
+ */
+static void cpuset_fork(struct task_struct *task)
+{
+	bool in_top;
+
+	rcu_read_lock();
+	in_top = task_cs(task) == &top_cpuset;
+	rcu_read_unlock();
+	if (in_top)
+		return;
+
+	set_cpus_allowed_ptr(task, &current->cpus_allowed);
+	task->mems_allowed = current->mems_allowed;
+}
+
 struct cgroup_subsys cpuset_subsys = {
 	.name = "cpuset",
 	.css_alloc = cpuset_css_alloc,
@@ -2091,6 +2110,7 @@ struct cgroup_subsys cpuset_subsys = {
 	.attach = cpuset_attach,
 	.subsys_id = cpuset_subsys_id,
 	.base_cftypes = files,
+	.fork = cpuset_fork,
 	.early_init = 1,
 };
 
