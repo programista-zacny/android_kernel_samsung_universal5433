@@ -129,6 +129,19 @@ config BCMDHD_PCIE
 	---help---
 	  Enable PCI Express I/F Support
 
+config BCMDHD_SCHED_SCAN
+	bool "PNO through cfg80211 scheduled scan"
+	depends on (BCM4354 || BCM4358)
+	default n
+	---help---
+	  Build the driver with WL_SCHED_SCAN: advertise nl80211 scheduled
+	  scan (WIPHY_FLAG_SUPPORTS_SCHED_SCAN, max_sched_scan_ssids,
+	  max_match_sets) and run NL80211_CMD_START_SCHED_SCAN as a firmware
+	  PFN (preferred network offload) scan. wificond starts such a scan
+	  for the Wi-Fi framework while the screen is off and Wi-Fi is
+	  disconnected. Without it the driver keeps PNO only behind the
+	  Android private command PNOSETUP, which nothing uses any more.
+
 config BCMDHD_DEBUG_PAGEALLOC
 	bool "Enable Memory Pagealloc Debugging Support"
 	depends on (BCM4354 || BCM4358)

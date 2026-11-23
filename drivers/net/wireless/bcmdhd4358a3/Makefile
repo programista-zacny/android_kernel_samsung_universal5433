@@ -68,6 +68,11 @@ endif
 DHDCFLAGS += -DCUSTOMER_HW4
 DHDCFLAGS += -DWL_CFG80211
 
+# Scheduled scan (PNO) for wificond, see CONFIG_BCMDHD_SCHED_SCAN
+ifeq ($(CONFIG_BCMDHD_SCHED_SCAN),y)
+DHDCFLAGS += -DWL_SCHED_SCAN
+endif
+
 # DMA64 suppports on 64bit Architecture
 ifeq ($(CONFIG_64BIT),y)
 DHDCFLAGS := $(filter-out -DBCMDMA32,$(DHDCFLAGS))
