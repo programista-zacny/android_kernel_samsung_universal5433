@@ -415,6 +415,12 @@
 
 #define __NR_getrandom			(__NR_SYSCALL_BASE+384)
 #define __NR_memfd_create		(__NR_SYSCALL_BASE+385)
+/* 386 to 435 are not implemented in this tree, except */
+#define __NR_pidfd_send_signal		(__NR_SYSCALL_BASE+424)
+#define __NR_pidfd_open			(__NR_SYSCALL_BASE+434)
+#define __NR_close_range		(__NR_SYSCALL_BASE+436)
+/* 437 to 440 are not implemented in this tree */
+#define __NR_epoll_pwait2		(__NR_SYSCALL_BASE+441)
 
 /*
  * The following SWIs are ARM private.

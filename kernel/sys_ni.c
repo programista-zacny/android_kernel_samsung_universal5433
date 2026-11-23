@@ -68,6 +68,7 @@ cond_syscall(sys_epoll_create1);
 cond_syscall(sys_epoll_ctl);
 cond_syscall(sys_epoll_wait);
 cond_syscall(sys_epoll_pwait);
+cond_syscall(sys_epoll_pwait2);
 cond_syscall(compat_sys_epoll_pwait);
 cond_syscall(sys_semget);
 cond_syscall(sys_semop);
@@ -194,6 +195,9 @@ cond_syscall(compat_sys_timerfd_gettime);
 cond_syscall(sys_eventfd);
 cond_syscall(sys_eventfd2);
 cond_syscall(sys_memfd_create);
+cond_syscall(sys_close_range);
+cond_syscall(sys_pidfd_open);
+cond_syscall(sys_pidfd_send_signal);
 
 /* performance counters: */
 cond_syscall(sys_perf_event_open);

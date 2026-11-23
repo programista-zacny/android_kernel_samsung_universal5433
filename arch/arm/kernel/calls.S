@@ -395,6 +395,62 @@
 		CALL(sys_seccomp)
 		CALL(sys_getrandom)
 /* 385 */	CALL(sys_memfd_create)
+		CALL(sys_ni_syscall)		/* sys_bpf */
+		CALL(sys_ni_syscall)		/* sys_execveat */
+		CALL(sys_ni_syscall)		/* sys_userfaultfd */
+		CALL(sys_ni_syscall)		/* sys_membarrier */
+/* 390 */	CALL(sys_ni_syscall)		/* sys_mlock2 */
+		CALL(sys_ni_syscall)		/* sys_copy_file_range */
+		CALL(sys_ni_syscall)		/* sys_preadv2 */
+		CALL(sys_ni_syscall)		/* sys_pwritev2 */
+		CALL(sys_ni_syscall)		/* sys_pkey_mprotect */
+/* 395 */	CALL(sys_ni_syscall)		/* sys_pkey_alloc */
+		CALL(sys_ni_syscall)		/* sys_pkey_free */
+		CALL(sys_ni_syscall)		/* sys_statx */
+		CALL(sys_ni_syscall)		/* sys_rseq */
+		CALL(sys_ni_syscall)		/* sys_io_pgetevents */
+/* 400 */	CALL(sys_ni_syscall)		/* sys_migrate_pages */
+		CALL(sys_ni_syscall)		/* sys_kexec_file_load */
+		CALL(sys_ni_syscall)		/* unused */
+		CALL(sys_ni_syscall)		/* sys_clock_gettime64 */
+		CALL(sys_ni_syscall)		/* sys_clock_settime64 */
+/* 405 */	CALL(sys_ni_syscall)		/* sys_clock_adjtime64 */
+		CALL(sys_ni_syscall)		/* sys_clock_getres_time64 */
+		CALL(sys_ni_syscall)		/* sys_clock_nanosleep_time64 */
+		CALL(sys_ni_syscall)		/* sys_timer_gettime64 */
+		CALL(sys_ni_syscall)		/* sys_timer_settime64 */
+/* 410 */	CALL(sys_ni_syscall)		/* sys_timerfd_gettime64 */
+		CALL(sys_ni_syscall)		/* sys_timerfd_settime64 */
+		CALL(sys_ni_syscall)		/* sys_utimensat_time64 */
+		CALL(sys_ni_syscall)		/* sys_pselect6_time64 */
+		CALL(sys_ni_syscall)		/* sys_ppoll_time64 */
+/* 415 */	CALL(sys_ni_syscall)		/* unused */
+		CALL(sys_ni_syscall)		/* sys_io_pgetevents_time64 */
+		CALL(sys_ni_syscall)		/* sys_recvmmsg_time64 */
+		CALL(sys_ni_syscall)		/* sys_mq_timedsend_time64 */
+		CALL(sys_ni_syscall)		/* sys_mq_timedreceive_time64 */
+/* 420 */	CALL(sys_ni_syscall)		/* sys_semtimedop_time64 */
+		CALL(sys_ni_syscall)		/* sys_rt_sigtimedwait_time64 */
+		CALL(sys_ni_syscall)		/* sys_futex_time64 */
+		CALL(sys_ni_syscall)		/* sys_sched_rr_get_interval_time64 */
+		CALL(sys_pidfd_send_signal)
+/* 425 */	CALL(sys_ni_syscall)		/* sys_io_uring_setup */
+		CALL(sys_ni_syscall)		/* sys_io_uring_enter */
+		CALL(sys_ni_syscall)		/* sys_io_uring_register */
+		CALL(sys_ni_syscall)		/* sys_open_tree */
+		CALL(sys_ni_syscall)		/* sys_move_mount */
+/* 430 */	CALL(sys_ni_syscall)		/* sys_fsopen */
+		CALL(sys_ni_syscall)		/* sys_fsconfig */
+		CALL(sys_ni_syscall)		/* sys_fsmount */
+		CALL(sys_ni_syscall)		/* sys_fspick */
+		CALL(sys_pidfd_open)
+/* 435 */	CALL(sys_ni_syscall)		/* sys_clone3 */
+		CALL(sys_close_range)
+		CALL(sys_ni_syscall)		/* sys_openat2 */
+		CALL(sys_ni_syscall)		/* sys_pidfd_getfd */
+		CALL(sys_ni_syscall)		/* sys_faccessat2 */
+/* 440 */	CALL(sys_ni_syscall)		/* sys_process_madvise */
+		CALL(sys_epoll_pwait2)
 
 #ifndef syscalls_counted
 .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
